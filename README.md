@@ -1,4 +1,14 @@
-[Install tpm2-tools](https://github.com/tpm2-software/tpm2-tools)
+# TPM Bound GCP Service Account Credentials
+
+This repo is a demonstration of how you can embed a service account's
+private key into a Shielded VMs vTPM then use it to sign JWTs that can
+be used to authenticate to Google Cloud APIs. Assuming that the key pair
+only exists within the TPM (barring exfiltration), valid JWTs can only
+be signed while on the Compute VM effectively "binding" the credentials.
+
+> **NOTE:** The content in this repo is very experimental and for demonstration
+> purposes only. You should take proper precautions before using this method in
+> an active environment.
 
 ## Create Compute Shielded VM
 
