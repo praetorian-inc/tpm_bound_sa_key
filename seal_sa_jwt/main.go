@@ -4,16 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/pem"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"math/big"
 	"os"
 	"time"
 
+	"io/ioutil"
+
 	tpmpb "github.com/google/go-tpm-tools/proto"
 	"github.com/google/go-tpm-tools/server"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/iam/v1"
+	"github.com/golang/protobuf/proto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -26,7 +30,7 @@ func main() {
 	projectID := flag.String("projectID", "", "Instance Project")
 	instanceZone := flag.String("zone", "", "Zone where instance resides")
 	serviceAccount := flag.String("serviceAccount", "", "Service Account to Impersonate")
-	// pcrValues := flag.String("PCR", "", "PCR Values for Instance")
+	outputFile := flag.String("outputFile", "", "Service Account to Impersonate")
 	flag.Parse()
 
 	if *instanceName == "" {
@@ -49,10 +53,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	/* if *pcrValues == "" {
-		fmt.Printf("Please enter VM PCR Values.")
+	if *outputFile == "" {
+		fmt.Printf("Please enter a stored location for the sealed blob.")
 		os.Exit(1)
-	} */
+	}
 
 	// Initialize Gcloud
 	ctx := context.Background()
@@ -69,6 +73,7 @@ func main() {
 	}
 
 	// Create keypair in memory and generate x509
+	fmt.Println("Generating keypair....")
 	privatekey, err := rsa.GenerateKey(rand.Reader, 2048)
 	publickey := &privatekey.PublicKey
 
@@ -80,13 +85,13 @@ func main() {
 	}
 
 	// Taken from: https://golang.org/src/crypto/tls/generate_cert.go
-	var notBefore time.Time
-	notAfter := notBefore.Add(time.Hour*24)
+	notBefore := time.Now()
+	notAfter := notBefore.Add(time.Hour*24*365)
 
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization: []string{"Acme Co"},
+			CommonName: "unused",
 		},
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
@@ -104,11 +109,13 @@ func main() {
 
 	certEncoded := &bytes.Buffer{}
 	pem.Encode(certEncoded, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	encodedString := base64.StdEncoding.EncodeToString([]byte(certEncoded.String()))
 
 	// upload key
+	fmt.Println("Uploading Certificate into Service Account....")
 	keyService := iam.NewProjectsServiceAccountsKeysService(iamService)
 	_, keyError := keyService.Upload(*serviceAccount, &iam.UploadServiceAccountKeyRequest{
-		PublicKeyData: certEncoded.String(),
+		PublicKeyData: encodedString,
 	}).Do()
 	if keyError != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", keyError)
@@ -123,6 +130,7 @@ func main() {
 	}
 
 	// Taken from https://github.com/salrashid123/gcp_tpm_sealed_keys/blob/494c1235f152455ae6bbd8957af7997f6fdecf67/asymmetric/seal/main.go
+	fmt.Println("Signing blob with GCP VM key.....")
 	block, _ := pem.Decode([]byte(response.EncryptionKey.EkPub))
 	parsedPublicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
 
@@ -134,6 +142,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("%+v\n",blob) // Print with Variable Name
-	fmt.Printf("Utilize SCP or your instrumentation of choice to upload the key to the vTPM.")
+	data, err := proto.Marshal(blob)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	err = ioutil.WriteFile(*outputFile, data, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Utilize SCP or your instrumentation of choice to upload the key to the vTPM.")
 }
