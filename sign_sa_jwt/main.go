@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"time"
@@ -12,17 +14,34 @@ import (
 
 var (
 	jwtHeader = `{"alg":"RS256","typ":"JWT"}`
-	jwtIss    = "REPLACE_ME@PROJECT_ID.iam.gserviceaccount.com"
-	jwtScope  = "https://www.googleapis.com/auth/compute.readonly"
 	jwtAud    = "https://oauth2.googleapis.com/token"
-	jwtSub    = "REPLACE_ME@PROJECT_ID.iam.gserviceaccount.com"
+
+	jwtScope       string
+	serviceAccount string
 
 	keyHandle = 0x81010002
 )
 
-func main() {
+type claims struct {
+	Issuer   string `json:"iss"`
+	Scope    string `json:"scope"`
+	Audience string `json:"aud"`
+	Subject  string `json:"sub"`
+	IssuedAt int64  `json:"iat"`
+	Expires  int64  `json:"exp"`
+}
 
-	jwtString := buildJWT()
+func main() {
+	flag.StringVar(&jwtScope, "scope", "https://www.googleapis.com/auth/compute.readonly", "API scope of the JWT")
+	flag.StringVar(&serviceAccount, "sa-email", "REPLACE_ME@PROJECT_ID.iam.gserviceaccount.com", "Email of the service account")
+	flag.Parse()
+
+	jwtString, err := buildJWT(jwtScope, serviceAccount)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+
 	signedJWT, err := signJWT(jwtString)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -32,18 +51,30 @@ func main() {
 	fmt.Println(signedJWT)
 }
 
-func buildJWT() string {
+func buildJWT(jwtScope, serviceAccount string) (string, error) {
 	now := time.Now().Unix()
 	expires := now + 3600
 
-	jwtClaims := fmt.Sprintf(`{"iss": "%s","scope": "%s","aud": "%s","sub": "%s","iat": %d,"exp": %d}`, jwtIss, jwtScope, jwtAud, jwtSub, now, expires)
+	claimsStruct := &claims{
+		Issuer:   serviceAccount,
+		Scope:    jwtScope,
+		Audience: jwtAud,
+		Subject:  serviceAccount,
+		IssuedAt: now,
+		Expires:  expires,
+	}
+
+	jwtClaims, err := json.Marshal(claimsStruct)
+	if err != nil {
+		return "", fmt.Errorf("Failed to construct JWT claims: %v", err)
+	}
 
 	b64JWTHeader := base64.RawURLEncoding.EncodeToString([]byte(jwtHeader))
 	b64JWTClaims := base64.RawURLEncoding.EncodeToString([]byte(jwtClaims))
 
 	jwtString := fmt.Sprintf("%s.%s", b64JWTHeader, b64JWTClaims)
 
-	return jwtString
+	return jwtString, nil
 }
 
 func signJWT(jwt string) (signed string, retErr error) {
