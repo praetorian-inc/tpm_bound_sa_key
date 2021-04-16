@@ -91,7 +91,17 @@ Install [tpm2-tools](https://github.com/tpm2-software/tpm2-tools)
 apt install tpm2-tools
 ```
 
-## Generate the key in the TPM
+## Generate the key for delivery to the TPM
+
+The script in `seal_sa_jwt/main.go` generates a 2048-bit RSA private key 
+and associates the key with a user-supplied service account. It then 
+fetches a target VM's Endorsement Key and seals the encrypted blob. 
+
+Alternatively, a user can implement this flow with the following steps 
+on a Shielded Compute Instance. The repository scripts assume that the instance 
+which uploads the private key and signs it with a Compute VM's endorsement 
+key is distinct from the instance which actually unseals the key and 
+uses it to authenticate to Google APIs.
 
 > This method generates the primary key in the TPM; however, you could
 > also [download a P12 key file for a service account](embed_sa_p12_keys.md).
