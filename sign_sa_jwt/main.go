@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -32,20 +33,23 @@ type claims struct {
 }
 
 func main() {
-	flag.StringVar(&jwtScope, "scope", "https://www.googleapis.com/auth/compute.readonly", "API scope of the JWT")
-	flag.StringVar(&serviceAccount, "sa-email", "REPLACE_ME@PROJECT_ID.iam.gserviceaccount.com", "Email of the service account")
+	flag.StringVar(&jwtScope, "scope", "https://www.googleapis.com/auth/cloud-platform", "API scope of the JWT")
+	flag.StringVar(&serviceAccount, "sa-email", "", "Email of the service account")
 	flag.Parse()
+
+	if serviceAccount == "" {
+		fmt.Fprint(os.Stderr, "Please provide the `sa-email` flag")
+		os.Exit(1)
+	}
 
 	jwtString, err := buildJWT(jwtScope, serviceAccount)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	signedJWT, err := signJWT(jwtString)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	fmt.Println(signedJWT)
@@ -66,7 +70,7 @@ func buildJWT(jwtScope, serviceAccount string) (string, error) {
 
 	jwtClaims, err := json.Marshal(claimsStruct)
 	if err != nil {
-		return "", fmt.Errorf("Failed to construct JWT claims: %v", err)
+		return "", fmt.Errorf("failed to construct JWT claims: %v", err)
 	}
 
 	b64JWTHeader := base64.RawURLEncoding.EncodeToString([]byte(jwtHeader))
@@ -81,7 +85,7 @@ func signJWT(jwt string) (signed string, retErr error) {
 	// https://github.com/google/go-tpm/blob/master/examples/tpm2-seal-unseal
 	rwc, err := tpm2.OpenTPM("/dev/tpm0")
 	if err != nil {
-		return "", fmt.Errorf("Unable to open TPM /dev/tpm0: %v", err)
+		return "", fmt.Errorf("unable to open TPM /dev/tpm0: %v", err)
 	}
 	defer func() {
 		if err := rwc.Close(); err != nil {
@@ -93,7 +97,7 @@ func signJWT(jwt string) (signed string, retErr error) {
 
 	digest, validationTicket, err := tpm2.Hash(rwc, tpm2.AlgSHA256, []byte(jwt), tpm2.HandleOwner)
 	if err != nil {
-		return "", fmt.Errorf("Error while generating hash: %v", err)
+		return "", fmt.Errorf("error while generating hash: %v", err)
 	}
 
 	sig, err := tpm2.Sign(rwc, handle, "", digest[:], validationTicket, &tpm2.SigScheme{
@@ -101,7 +105,7 @@ func signJWT(jwt string) (signed string, retErr error) {
 		Hash: tpm2.AlgSHA256,
 	})
 	if err != nil {
-		return "", fmt.Errorf("Error while signing JWT: %v", err)
+		return "", fmt.Errorf("error while signing JWT: %v", err)
 	}
 
 	b64JWTSignature := base64.RawURLEncoding.EncodeToString([]byte(sig.RSA.Signature))

@@ -1,6 +1,8 @@
 # TPM Bound GCP Service Account Credentials
 
-This repo is a demonstration of how you can embed a service account's
+> Credit to ![salrashid123](https://github.com/salrashid123/tpm2_evp_sign_decrypt)!
+
+This repo demonstrates how you can embed a service account's
 private key into a Shielded VMs vTPM then use it to sign JWTs that can
 be used to authenticate to Google Cloud APIs. Assuming that the key pair
 only exists within the TPM (barring exfiltration), valid JWTs can only
@@ -114,9 +116,8 @@ tpm2_load -C primary.ctx -u key.pub -r key.priv -c key.ctx
 ```
 
 Make the key persistent in the TPM at the handle `0x81010002`. This handle
-value is arbitrary... I took it from the `tpm2_evictcontrol` man page.
-You can leave it blank and the key will be persisted at the first available
-handle.
+value is arbitrary. If leave it blank and the key will be persisted at the
+first available handle.
 ```
 tpm2_evictcontrol -C o -c key.ctx 0x81010002
 ```
@@ -146,7 +147,7 @@ gcloud iam service-accounts keys list \
 
 [Service account JWT format](https://developers.google.com/identity/protocols/oauth2/service-account#authorizingrequests)
 
-You can use the go util included in this repo to accomplish this.
+You can use [sign_sa_jwt](./sign_sa_jwt) included in this repo to accomplish this.
 
 > **NOTE:** You will probably want to update the claim values to for your use case
 

@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math/big"
 	"os"
 	"time"
@@ -33,7 +34,6 @@ var (
 )
 
 func main() {
-
 	flag.StringVar(&instanceName, "instanceName", "", "Instance for which to generate key")
 	flag.StringVar(&projectID, "projectID", "", "Instance Project")
 	flag.StringVar(&zone, "zone", "", "Zone where instance resides")
@@ -56,20 +56,17 @@ func main() {
 	fmt.Println("[+] Generating keypair....")
 	publicKeyData, privateKey, err := generateKeysAndCert()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	fmt.Println("[+] Uploading Certificate into Service Account....")
 	if err := uploadKeyToServiceAccount(publicKeyData); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	fmt.Printf("[+] Signing blob and writing it to %s\n", outputFile)
 	if err := signAndSaveBlob(privateKey); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 	// 	fmt.Println("Utilize SCP or your instrumentation of choice to upload the key to the vTPM.")
 }
@@ -78,13 +75,13 @@ func main() {
 func generateKeysAndCert() (string, *rsa.PrivateKey, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return "", nil, fmt.Errorf("Failed to generate RSA keypair: %v", err)
+		return "", nil, fmt.Errorf("failed to generate RSA keypair: %v", err)
 	}
 
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
-		return "", nil, fmt.Errorf("Failed to generate x509 serial number: %v", err)
+		return "", nil, fmt.Errorf("failed to generate x509 serial number: %v", err)
 	}
 
 	notBefore := time.Now()
@@ -105,12 +102,14 @@ func generateKeysAndCert() (string, *rsa.PrivateKey, error) {
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	if err != nil {
-		return "", nil, fmt.Errorf("Failed to create x509 cert: %v", err)
+		return "", nil, fmt.Errorf("failed to create x509 cert: %v", err)
 	}
 
-	certEncoded := &bytes.Buffer{}
-	pem.Encode(certEncoded, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	pubKeyData := base64.StdEncoding.EncodeToString([]byte(certEncoded.String()))
+	var certEncoded bytes.Buffer
+	if err := pem.Encode(&certEncoded, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		return "", nil, fmt.Errorf("failed to PEM encode certificate")
+	}
+	pubKeyData := base64.StdEncoding.EncodeToString(certEncoded.Bytes())
 	return pubKeyData, privateKey, nil
 }
 
@@ -118,7 +117,7 @@ func generateKeysAndCert() (string, *rsa.PrivateKey, error) {
 func uploadKeyToServiceAccount(publicKeyData string) error {
 	iamService, err := iam.NewService(ctx)
 	if err != nil {
-		return fmt.Errorf("Failed to initiate IAM client SDK: %v", err)
+		return fmt.Errorf("failed to initiate IAM client SDK: %v", err)
 	}
 	keyService := iam.NewProjectsServiceAccountsKeysService(iamService)
 
@@ -127,7 +126,7 @@ func uploadKeyToServiceAccount(publicKeyData string) error {
 	}
 
 	if _, err := keyService.Upload(serviceAccount, uploadKeyRequest).Do(); err != nil {
-		return fmt.Errorf("Failed to upload key to service account: %v", err)
+		return fmt.Errorf("failed to upload key to service account: %v", err)
 	}
 	return nil
 }
@@ -136,12 +135,12 @@ func uploadKeyToServiceAccount(publicKeyData string) error {
 func signAndSaveBlob(privateKey *rsa.PrivateKey) error {
 	computeService, err := compute.NewService(ctx)
 	if err != nil {
-		return fmt.Errorf("Failed to initiate Compute client SDK: %v", err)
+		return fmt.Errorf("failed to initiate Compute client SDK: %v", err)
 	}
 
 	resp, err := computeService.Instances.GetShieldedInstanceIdentity(projectID, zone, instanceName).Do()
 	if err != nil {
-		return fmt.Errorf("Failed to get Compute instance's shielded instance identity: %v", err)
+		return fmt.Errorf("failed to get Compute instance's shielded instance identity: %v", err)
 	}
 
 	// Taken from https://github.com/salrashid123/gcp_tpm_sealed_keys/blob/494c1235f152455ae6bbd8957af7997f6fdecf67/asymmetric/seal/main.go
@@ -149,22 +148,22 @@ func signAndSaveBlob(privateKey *rsa.PrivateKey) error {
 	block, _ := pem.Decode([]byte(resp.EncryptionKey.EkPub))
 	parsedPublicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return fmt.Errorf("Failed to parse public key from instance EKPub: %v", err)
+		return fmt.Errorf("failed to parse public key from instance EKPub: %v", err)
 	}
 
 	// Sign private key and save blob.
 	blob, err := server.CreateSigningKeyImportBlob(parsedPublicKey, privateKey, nil)
 	if err != nil {
-		return fmt.Errorf("Failed to create signing key import blob: %v", err)
+		return fmt.Errorf("failed to create signing key import blob: %v", err)
 	}
 
 	data, err := proto.Marshal(blob)
 	if err != nil {
-		return fmt.Errorf("Failed to serialize blob to protobuf: %v", err)
+		return fmt.Errorf("failed to serialize blob to protobuf: %v", err)
 	}
 
 	if err := ioutil.WriteFile(outputFile, data, 0644); err != nil {
-		return fmt.Errorf("Failed to write signed blob to file: %v", err)
+		return fmt.Errorf("failed to write signed blob to file: %v", err)
 	}
 	return nil
 }
